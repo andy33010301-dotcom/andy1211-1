@@ -1,0 +1,7 @@
+{
+  "name": "Food Radar",
+  "description": "Can't decide what to eat? Let the Food Radar scan your area and pick a delicious spot for you!",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
