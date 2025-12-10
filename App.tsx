@@ -12,7 +12,19 @@ const App: React.FC = () => {
   const [selectedRestaurant, setSelectedRestaurant] = useState<Restaurant | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>('');
 
-  const handleStart = useCallback(() => {
+  const handleStart = useCallback(async () => {
+    // 1. Check for dynamic API Key selection (for specific AI environments)
+    if (window.aistudio) {
+      try {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+           await window.aistudio.openSelectKey();
+        }
+      } catch (err) {
+        console.error("Failed to select API key via window.aistudio", err);
+      }
+    }
+
     setState('LOCATING');
     
     if (!navigator.geolocation) {
@@ -173,7 +185,7 @@ const App: React.FC = () => {
               <MapPinOff size={32} />
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Oops!</h3>
-            <p className="text-slate-500 mb-8 max-w-xs break-words">{errorMsg}</p>
+            <p className="text-slate-500 mb-8 max-w-xs break-words px-4 leading-relaxed">{errorMsg}</p>
             <button 
               onClick={handleReset}
               className="bg-slate-900 text-white font-medium py-3 px-8 rounded-full hover:bg-slate-800"

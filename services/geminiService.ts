@@ -84,9 +84,10 @@ const parseRestaurantsFromText = (text: string, groundingChunks: any[]): Restaur
 };
 
 export const fetchNearbyRestaurants = async (coords: Coordinates): Promise<Restaurant[]> => {
+  // Check if API Key is available
   if (!process.env.API_KEY) {
     console.error("API Key not found in environment variables");
-    throw new Error("System configuration error: API Key is missing.");
+    throw new Error("API Key is missing. Please set 'API_KEY' in your Vercel Environment Variables.");
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -121,8 +122,6 @@ export const fetchNearbyRestaurants = async (coords: Coordinates): Promise<Resta
     const text = response.text || "";
     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
 
-    // console.log("Raw Response:", text); // Helpful for debugging parsing issues
-
     const parsed = parseRestaurantsFromText(text, groundingChunks);
     
     if (parsed.length === 0) {
@@ -134,6 +133,7 @@ export const fetchNearbyRestaurants = async (coords: Coordinates): Promise<Resta
 
   } catch (error: any) {
     console.error("Error fetching from Gemini:", error);
+    // Propagate the specific error message
     throw error;
   }
 };
