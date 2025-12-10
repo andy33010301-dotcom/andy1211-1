@@ -5,35 +5,78 @@ const parseRestaurantsFromText = (text: string, groundingChunks: any[]): Restaur
   const restaurants: Restaurant[] = [];
   const lines = text.split('\n');
   
-  // Simple parsing logic assuming the model follows the requested format reasonably well
-  // Format requested: "Name || Cuisine || Description"
-  
   lines.forEach((line) => {
-    if (line.includes('||')) {
-      const parts = line.split('||').map(s => s.trim());
-      if (parts.length >= 3) {
-        // Clean up markdown list markers if present
-        const nameClean = parts[0].replace(/^[\d\-\*\.]+\s*/, '').replace(/\*\*/g, '').trim();
+    // Basic cleanup
+    const cleanLine = line.trim();
+    if (!cleanLine) return;
+    
+    // Skip likely conversational headers/footers
+    if (cleanLine.toLowerCase().startsWith('here are')) return;
+    if (cleanLine.toLowerCase().startsWith('sure,')) return;
+
+    let name = '';
+    let cuisine = 'Local Flavor';
+    let description = 'Highly rated restaurant nearby.';
+
+    // Strategy 1: The requested "||" format (Strict)
+    if (cleanLine.includes('||')) {
+      const parts = cleanLine.split('||').map(s => s.trim());
+      // Even if parts are incomplete, try to use what we have
+      if (parts[0]) name = parts[0];
+      if (parts[1]) cuisine = parts[1];
+      if (parts[2]) description = parts[2];
+    } 
+    // Strategy 2: Numbered/Bulleted list with bolding (Common fallback output) e.g. "1. **Place**: Desc"
+    else if (cleanLine.match(/^[\d\-\*\•]+[\.\)]?\s*/)) {
+        // Remove the list marker (e.g. "1. ", "* ", "- ")
+        let content = cleanLine.replace(/^[\d\-\*\•]+[\.\)]?\s*/, '');
         
-        // Attempt to find a matching grounding chunk for the URL
+        // Check for Bolded Name (standard Gemini markdown)
+        const boldMatch = content.match(/\*\*(.*?)\*\*/);
+        if (boldMatch) {
+            name = boldMatch[1];
+            // Remove name from content to find description
+            const remaining = content.replace(/\*\*.*?\*\*/, '').trim();
+            // Remove separators like ": " or "- "
+            const desc = remaining.replace(/^[:\-–,]\s*/, '');
+            if (desc) description = desc;
+        } else {
+            // No bolding, try splitting by first colon or hyphen
+            const separatorMatch = content.match(/[:\-–]/);
+            if (separatorMatch) {
+                const parts = content.split(separatorMatch[0]);
+                name = parts[0].trim();
+                if (parts[1]) description = parts.slice(1).join(' ').trim();
+            } else {
+                // Last resort: take the whole line as name if it's short enough to be a name
+                if (content.length < 50 && content.length > 2) {
+                    name = content;
+                }
+            }
+        }
+    }
+
+    // Final cleanup of the name (remove any remaining markdown stars or extra spaces)
+    name = name.replace(/\*\*/g, '').trim();
+
+    // Only add if we successfully extracted a valid-looking name
+    if (name && name.length > 1) {
+         // Attempt to find a matching grounding chunk for the URL
         const chunk = groundingChunks?.find((c: any) => 
-          c.web?.title?.toLowerCase().includes(nameClean.toLowerCase()) || 
-          nameClean.toLowerCase().includes(c.web?.title?.toLowerCase()) ||
-          c.maps?.title?.toLowerCase().includes(nameClean.toLowerCase())
+            c.web?.title?.toLowerCase().includes(name.toLowerCase()) || 
+            name.toLowerCase().includes(c.web?.title?.toLowerCase()) ||
+            c.maps?.title?.toLowerCase().includes(name.toLowerCase())
         );
 
         let uri = chunk?.web?.uri || chunk?.maps?.uri;
 
-        // If no direct URI found in chunks, we leave it undefined (UI handles this)
-        
         restaurants.push({
-          id: Math.random().toString(36).substr(2, 9),
-          name: nameClean,
-          cuisine: parts[1],
-          description: parts[2],
-          googleMapsUri: uri
+            id: Math.random().toString(36).substr(2, 9),
+            name: name,
+            cuisine: cuisine,
+            description: description,
+            googleMapsUri: uri
         });
-      }
     }
   });
 
@@ -42,7 +85,8 @@ const parseRestaurantsFromText = (text: string, groundingChunks: any[]): Restaur
 
 export const fetchNearbyRestaurants = async (coords: Coordinates): Promise<Restaurant[]> => {
   if (!process.env.API_KEY) {
-    throw new Error("API Key is missing");
+    console.error("API Key not found in environment variables");
+    throw new Error("System configuration error: API Key is missing.");
   }
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -50,14 +94,17 @@ export const fetchNearbyRestaurants = async (coords: Coordinates): Promise<Resta
   try {
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: `Find 8 highly-rated and popular restaurants near the user's current location. 
-      Try to include a diverse mix of cuisines (e.g., local favorites, asian, western, dessert, etc.).
+      contents: `Find 8 popular restaurants near latitude ${coords.latitude}, longitude ${coords.longitude}.
       
-      CRITICAL OUTPUT FORMAT:
-      You MUST list them strictly in this format, one per line:
-      Name || Cuisine Type || A short, appetizing 1-sentence description.
+      Instructions:
+      1. Provide a diverse mix of cuisines.
+      2. Strictly use this format for each line:
+      Name || Cuisine Type || Short description
+      
+      Example:
+      Joe's Pizza || Italian || Famous for their thin crust.
 
-      Do not include any intro or outro text. Just the list.`,
+      If you strictly cannot follow the format, just ensure the Restaurant Name is the first thing on the line.`,
       config: {
         tools: [{ googleMaps: {} }],
         toolConfig: {
@@ -72,20 +119,20 @@ export const fetchNearbyRestaurants = async (coords: Coordinates): Promise<Resta
     });
 
     const text = response.text || "";
-    // Accessing grounding chunks to get real map links
     const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+
+    // console.log("Raw Response:", text); // Helpful for debugging parsing issues
 
     const parsed = parseRestaurantsFromText(text, groundingChunks);
     
-    // If parsing fails or returns empty, throw error to trigger retry or manual fallback
     if (parsed.length === 0) {
-      console.warn("Gemini response was empty or malformed:", text);
-      throw new Error("Could not find restaurants. Please try again.");
+      console.warn("Gemini response was parsed but resulted in 0 restaurants. Raw text:", text);
+      throw new Error("Found no valid restaurants in the area. Please try again.");
     }
 
     return parsed;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching from Gemini:", error);
     throw error;
   }

@@ -32,12 +32,17 @@ const App: React.FC = () => {
         try {
           const results = await fetchNearbyRestaurants(coords);
           // Simulate a bit of scanning time if API is too fast, for effect
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          setRestaurants(results);
-          setState('RESULTS');
-        } catch (err) {
+          if (results.length > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            setRestaurants(results);
+            setState('RESULTS');
+          } else {
+             throw new Error("No results found.");
+          }
+        } catch (err: any) {
           console.error(err);
-          setErrorMsg("Could not find restaurants. Please try again later.");
+          // Show the actual error message if available, otherwise generic
+          setErrorMsg(err.message || "Could not find restaurants. Please try again later.");
           setState('ERROR');
         }
       },
@@ -46,7 +51,7 @@ const App: React.FC = () => {
         setErrorMsg("Please enable location access to find food nearby.");
         setState('ERROR');
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 15000 }
     );
   }, []);
 
@@ -168,7 +173,7 @@ const App: React.FC = () => {
               <MapPinOff size={32} />
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Oops!</h3>
-            <p className="text-slate-500 mb-8 max-w-xs">{errorMsg}</p>
+            <p className="text-slate-500 mb-8 max-w-xs break-words">{errorMsg}</p>
             <button 
               onClick={handleReset}
               className="bg-slate-900 text-white font-medium py-3 px-8 rounded-full hover:bg-slate-800"
